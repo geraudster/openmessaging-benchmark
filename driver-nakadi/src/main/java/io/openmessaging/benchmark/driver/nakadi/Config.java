@@ -19,13 +19,7 @@
 package io.openmessaging.benchmark.driver.nakadi;
 
 public class Config {
-    public short replicationFactor;
-
-    public String topicConfig;
-
     public String commonConfig;
 
     public String producerConfig;
-
-    public String consumerConfig;
 }

@@ -21,20 +21,10 @@
 name: Nakadi
 driverClass: io.openmessaging.benchmark.driver.nakadi.NakadiBenchmarkDriver
 
-## Kafka client-specific configuration
-#replicationFactor: 3
-#
-#topicConfig: |
-#  min.insync.replicas=2
-#
-#commonConfig: |
-#  bootstrap.servers=localhost:9092
-#
-#producerConfig: |
-#  acks=all
-#  linger.ms=1
-#  batch.size=131072
-#
-#consumerConfig: |
-#  auto.offset.reset=earliest
-#  enable.auto.commit=false
+## Nakadi client-specific configuration
+commonConfig: |
+  nakadiBaseUri=http://localhost:8080
+
+producerConfig: |
+  nbThreads=10
+  async=true

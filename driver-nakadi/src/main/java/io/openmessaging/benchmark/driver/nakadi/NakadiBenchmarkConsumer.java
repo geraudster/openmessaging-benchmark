@@ -25,6 +25,8 @@ import nakadi.NakadiClient;
 import nakadi.StreamConfiguration;
 import nakadi.StreamProcessor;
 
+import java.util.Properties;
+
 public class NakadiBenchmarkConsumer implements BenchmarkConsumer {
 
     private final StreamProcessor processor;
@@ -37,6 +39,9 @@ public class NakadiBenchmarkConsumer implements BenchmarkConsumer {
         processor = nakadiClient.resources().streamBuilder()
                 .streamConfiguration(sc)
                 .streamObserverFactory(new BenchmarkDataChangeEventObserverProvider(callback))
+                .streamOffsetObserver(streamCursorContext -> {
+
+                })
                 .build();
 
         processor.start();

@@ -22,6 +22,7 @@ import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import nakadi.*;
 
 import java.util.Optional;
+import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.ExecutorService;
 import java.util.concurrent.Executors;
@@ -31,38 +32,50 @@ import static io.openmessaging.benchmark.driver.nakadi.NakadiEvent.BENCHMARK_EVE
 public class NakadiBenchmarkProducer implements BenchmarkProducer {
 
     private final ExecutorService executor;
-    private final NakadiClient nakadiClient;
     private final String topic;
+    private final EventResource events;
+    private final boolean async;
 
-    public NakadiBenchmarkProducer(NakadiClient nakadiClient, String topic) {
-        this.executor = Executors.newSingleThreadExecutor();
-        this.nakadiClient = nakadiClient;
+    public NakadiBenchmarkProducer(NakadiClient nakadiClient, String topic, Properties producerConfig) {
+        this.executor = Executors.newFixedThreadPool(Integer.parseInt(producerConfig.getProperty("nbThreads")));
         this.topic = topic;
+        this.async = Boolean.valueOf(producerConfig.getProperty("async"));
+        events = nakadiClient.resources().events();
     }
 
     @Override
     public CompletableFuture<Void> sendAsync(Optional<String> key, byte[] payload) {
-        CompletableFuture<Void> future = new CompletableFuture<>();
-
-        this.executor.submit(() -> {
-            System.out.println(topic);
-            Response response = nakadiClient.resources().events().send(topic,
-                    new DataChangeEvent<NakadiEvent>()
-                            .metadata(EventMetadata.newPreparedEventMetadata())
-                            .op(DataChangeEvent.Op.C)
-                            .dataType(BENCHMARK_EVENT)
-                            .data(
-                            new NakadiEvent(
-                                    key.orElse(""),
-                                    payload,
-                                    System.currentTimeMillis())));
-            System.out.println(response.statusCode());
-            System.out.println(response.responseBody().asString());
-            future.complete(null);
-            return null;
-        });
+        final CompletableFuture<Void> future;
+        if(async) {
+            future = CompletableFuture.supplyAsync(() -> {
+                sendEvent(key, payload);
+                return null;
+            }, executor);
+        } else {
+            future = new CompletableFuture<>();
+            Response response = sendEvent(key, payload);
+            if(response.statusCode() == 200) {
+                future.complete(null);
+            } else {
+                future.completeExceptionally(new RuntimeException("Cannot send message"));
+            }
+        }
 
         return future;
+    }
+
+    private Response sendEvent(Optional<String> key, byte[] payload) {
+        EventMetadata metadata = new EventMetadata().withEid().withOccurredAt().flowId("PRODUCER_TEST");
+
+        DataChangeEvent<NakadiEvent> data = new DataChangeEvent<NakadiEvent>()
+                .metadata(metadata)
+                .op(DataChangeEvent.Op.C)
+                .dataType(BENCHMARK_EVENT)
+                .data(new NakadiEvent(
+                        key.orElse(""),
+                        payload));
+
+        return events.send(topic, data);
     }
 
     @Override

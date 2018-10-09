@@ -20,7 +20,9 @@
 package io.openmessaging.benchmark.driver.nakadi;
 
 import com.fasterxml.jackson.core.JsonProcessingException;
+import com.fasterxml.jackson.databind.DeserializationFeature;
 import com.fasterxml.jackson.databind.ObjectMapper;
+import com.fasterxml.jackson.dataformat.yaml.YAMLFactory;
 import com.fasterxml.jackson.module.jsonSchema.JsonSchema;
 import com.fasterxml.jackson.module.jsonSchema.JsonSchemaGenerator;
 import io.openmessaging.benchmark.driver.BenchmarkConsumer;
@@ -32,22 +34,28 @@ import org.apache.bookkeeper.stats.StatsLogger;
 
 import java.io.File;
 import java.io.IOException;
+import java.io.StringReader;
 import java.net.URI;
+import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
 
 import static io.openmessaging.benchmark.driver.nakadi.NakadiEvent.BENCHMARK_EVENT;
 
 public class NakadiBenchmarkDriver implements BenchmarkDriver {
-
-
-    private static final URI NAKADI_URI = URI.create("http://localhost:8080");
     private NakadiClient nakadiClient;
-    private String topic;
+    private final Properties commonProperties = new Properties();
+    private final Properties producerProperties = new Properties();
+
 
     @Override
     public void initialize(File configurationFile, StatsLogger statsLogger) throws IOException {
+        Config config = mapper.readValue(configurationFile, Config.class);
+        commonProperties.load(new StringReader(config.commonConfig));
+        producerProperties.load(new StringReader(config.producerConfig));
+
+        URI nakadiUri = URI.create(commonProperties.getProperty("nakadiBaseUri"));
         nakadiClient = NakadiClient.newBuilder()
-                .baseURI(NAKADI_URI)
+                .baseURI(nakadiUri)
                 .build();
     }
 
@@ -58,7 +66,6 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
 
     @Override
     public CompletableFuture<Void> createTopic(String topic, int partitions) {
-        this.topic = topic;
         return CompletableFuture.runAsync(() -> {
             try {
                 EventTypeResource eventTypes = nakadiClient.resources().eventTypes();
@@ -70,18 +77,20 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
 
                 String jsonSchema = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(schema);
                 System.out.println(jsonSchema);
+
                 // create a new event type, using an escaped string for the schema
-                EventType requisitions = new EventType()
+                EventType nakadiEventType = new EventType()
                         .category(EventType.Category.data)
                         .name(topic)
                         .owningApplication("open-messaging")
-                        .partitionStrategy(EventType.PARTITION_HASH)
+                        .partitionStrategy(EventType.PARTITION_RANDOM)
                         .enrichmentStrategy(EventType.ENRICHMENT_METADATA)
                         .partitionKeyFields("key")
                         .cleanupPolicy("delete")
+                        .eventTypeStatistics(new EventTypeStatistics(3000*60, 1024, 10, 10))
                         .schema(new EventTypeSchema().schema(
                                 jsonSchema));
-                Response response = eventTypes.create(requisitions);
+                Response response = eventTypes.create(nakadiEventType);
                 System.out.println(response.responseBody().asString());
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
@@ -91,7 +100,7 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
 
     @Override
     public CompletableFuture<BenchmarkProducer> createProducer(String topic) {
-        return CompletableFuture.completedFuture(new NakadiBenchmarkProducer(nakadiClient, topic));
+        return CompletableFuture.completedFuture(new NakadiBenchmarkProducer(nakadiClient, topic, producerProperties));
     }
 
     @Override
@@ -101,6 +110,9 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
 
     @Override
     public void close() throws Exception {
-
     }
+
+    private static final ObjectMapper mapper = new ObjectMapper(new YAMLFactory())
+            .configure(DeserializationFeature.FAIL_ON_UNKNOWN_PROPERTIES, false);
+
 }

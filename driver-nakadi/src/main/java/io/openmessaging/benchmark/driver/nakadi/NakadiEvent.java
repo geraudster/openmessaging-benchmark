@@ -24,12 +24,10 @@ public class NakadiEvent {
 
     private final String key;
     private final byte[] payload;
-    private final long publishTimestamp;
 
-    public NakadiEvent(String key, byte[] payload, long publishTimestamp) {
+    public NakadiEvent(String key, byte[] payload) {
         this.key = key;
         this.payload = payload;
-        this.publishTimestamp = publishTimestamp;
     }
 
     public String getKey() {
@@ -38,9 +36,5 @@ public class NakadiEvent {
 
     public byte[] getPayload() {
         return payload;
-    }
-
-    public long getPublishTimestamp() {
-        return publishTimestamp;
     }
 }
