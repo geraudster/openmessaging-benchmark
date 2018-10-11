@@ -22,4 +22,6 @@ public class Config {
     public String commonConfig;
 
     public String producerConfig;
+
+    public String consumerConfig;
 }

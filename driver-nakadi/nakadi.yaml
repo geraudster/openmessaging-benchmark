@@ -26,5 +26,9 @@ commonConfig: |
   nakadiBaseUri=http://localhost:8080
 
 producerConfig: |
-  nbThreads=10
-  async=true
+  batchSize=500
+  maxQueueSize=250
+  pollingDelayInMs=1
+
+consumerConfig: |
+  batchBufferCount=3000

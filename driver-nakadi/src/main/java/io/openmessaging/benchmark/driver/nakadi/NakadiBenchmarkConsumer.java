@@ -31,10 +31,11 @@ public class NakadiBenchmarkConsumer implements BenchmarkConsumer {
 
     private final StreamProcessor processor;
 
-    public NakadiBenchmarkConsumer(NakadiClient nakadiClient, String topic, ConsumerCallback callback) {
+    public NakadiBenchmarkConsumer(NakadiClient nakadiClient, String topic, Properties consumerProperties, ConsumerCallback callback) {
 
         StreamConfiguration sc = new StreamConfiguration()
                 .eventTypeName(topic);
+//                .batchBufferCount(Integer.parseInt(consumerProperties.getProperty("batchBufferCount")));
 
         processor = nakadiClient.resources().streamBuilder()
                 .streamConfiguration(sc)

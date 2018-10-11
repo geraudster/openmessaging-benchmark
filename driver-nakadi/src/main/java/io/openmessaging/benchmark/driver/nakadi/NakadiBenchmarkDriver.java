@@ -45,6 +45,7 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
     private NakadiClient nakadiClient;
     private final Properties commonProperties = new Properties();
     private final Properties producerProperties = new Properties();
+    private final Properties consumerProperties = new Properties();
 
 
     @Override
@@ -52,6 +53,7 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
         Config config = mapper.readValue(configurationFile, Config.class);
         commonProperties.load(new StringReader(config.commonConfig));
         producerProperties.load(new StringReader(config.producerConfig));
+        consumerProperties.load(new StringReader(config.consumerConfig));
 
         URI nakadiUri = URI.create(commonProperties.getProperty("nakadiBaseUri"));
         nakadiClient = NakadiClient.newBuilder()
@@ -87,7 +89,7 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
                         .enrichmentStrategy(EventType.ENRICHMENT_METADATA)
                         .partitionKeyFields("key")
                         .cleanupPolicy("delete")
-                        .eventTypeStatistics(new EventTypeStatistics(3000*60, 1024, 10, 10))
+                        .eventTypeStatistics(new EventTypeStatistics(10000*60, 1024, 10, 10))
                         .schema(new EventTypeSchema().schema(
                                 jsonSchema));
                 Response response = eventTypes.create(nakadiEventType);
@@ -105,7 +107,7 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
 
     @Override
     public CompletableFuture<BenchmarkConsumer> createConsumer(String topic, String subscriptionName, ConsumerCallback consumerCallback) {
-        return CompletableFuture.completedFuture(new NakadiBenchmarkConsumer(nakadiClient, topic, consumerCallback));
+        return CompletableFuture.completedFuture(new NakadiBenchmarkConsumer(nakadiClient, topic, consumerProperties, consumerCallback));
     }
 
     @Override
