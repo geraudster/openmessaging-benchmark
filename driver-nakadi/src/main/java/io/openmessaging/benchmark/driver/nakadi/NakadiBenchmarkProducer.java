@@ -19,11 +19,18 @@
 package io.openmessaging.benchmark.driver.nakadi;
 
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
-import nakadi.DataChangeEvent;
-import nakadi.EventMetadata;
-import nakadi.EventResource;
-import nakadi.NakadiClient;
+import nakadi.*;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
+import reactor.core.CoreSubscriber;
+import reactor.core.Disposable;
+import reactor.core.publisher.EmitterProcessor;
+import reactor.core.publisher.Flux;
+import reactor.core.publisher.FluxSink;
+import reactor.core.publisher.UnicastProcessor;
+import reactor.util.concurrent.Queues;
 
+import java.time.Duration;
 import java.util.*;
 import java.util.concurrent.CompletableFuture;
 import java.util.concurrent.LinkedBlockingQueue;
@@ -32,35 +39,46 @@ import java.util.stream.Collectors;
 import static io.openmessaging.benchmark.driver.nakadi.NakadiEvent.BENCHMARK_EVENT;
 
 public class NakadiBenchmarkProducer implements BenchmarkProducer {
+    private static final Logger logger = LoggerFactory.getLogger(NakadiBenchmarkProducer.class);
 
     private final String topic;
     private final EventResource eventResource;
-    private final LinkedBlockingQueue<AbstractMap.SimpleImmutableEntry<CompletableFuture<Void>, DataChangeEvent<NakadiEvent>>> queue;
-    private final int pollingDelayInMs;
 
     private boolean closing = false;
+    private final EmitterProcessor<DataChangeEvent<NakadiEvent>> processor;
+    private final FluxSink<DataChangeEvent<NakadiEvent>> sink;
 
     public NakadiBenchmarkProducer(NakadiClient nakadiClient, String topic, Properties producerConfig) {
         this.topic = topic;
-        this.queue = new LinkedBlockingQueue<>(Integer.parseInt(producerConfig.getProperty("maxQueueSize")));
-        this.pollingDelayInMs = Integer.parseInt(producerConfig.getProperty("pollingDelayInMs"));
         this.eventResource = nakadiClient.resources().events();
-        Thread nakadiBatchProducerThread = new Thread(new NakadiBatchProducer(queue, producerConfig));
-        nakadiBatchProducerThread.start();
+        int batchSize = Integer.parseInt(producerConfig.getProperty("batchSize"));
+
+        processor = EmitterProcessor.create(batchSize);
+        sink = processor.sink(FluxSink.OverflowStrategy.DROP);
+
+        Flux<DataChangeEvent<NakadiEvent>> from = Flux.from(processor);
+        from.onBackpressureBuffer()
+                .bufferTimeout(batchSize, Duration.ofMillis(100))
+                .map(events -> eventResource.send(topic, events))
+                .bufferTimeout(Integer.MAX_VALUE, Duration.ofSeconds(1))
+                .doOnNext(latencies -> logger.info("Sent messages :     " + latencies.size()))
+                .subscribe();
     }
 
     @Override
     public CompletableFuture<Void> sendAsync(Optional<String> key, byte[] payload) {
         final CompletableFuture<Void> future = new CompletableFuture<>();
-        while(queue.remainingCapacity() <= 0) {
+        DataChangeEvent<NakadiEvent> event = convertToDataChangeEvent(new NakadiEvent(key.orElse(""), payload));
+        while(sink.requestedFromDownstream() == 0) {
             try {
-                Thread.sleep(pollingDelayInMs);
+                Thread.sleep(10);
             } catch (InterruptedException e) {
                 e.printStackTrace();
             }
         }
-        queue.add(new AbstractMap.SimpleImmutableEntry<>(future, convertToDataChangeEvent(new NakadiEvent(key.orElse(""), payload))));
+        sink.next(event);
 
+        future.complete(null);
         return future;
     }
 
@@ -77,41 +95,6 @@ public class NakadiBenchmarkProducer implements BenchmarkProducer {
     @Override
     public void close() throws Exception {
         closing = true;
-    }
-
-    class NakadiBatchProducer implements Runnable {
-
-        private final LinkedBlockingQueue<AbstractMap.SimpleImmutableEntry<CompletableFuture<Void>, DataChangeEvent<NakadiEvent>>> queue;
-        private final int batchSize;
-
-        NakadiBatchProducer(LinkedBlockingQueue<AbstractMap.SimpleImmutableEntry<CompletableFuture<Void>, DataChangeEvent<NakadiEvent>>> queue, Properties producerConfig) {
-            this.queue = queue;
-            this.batchSize = Integer.parseInt(producerConfig.getProperty("batchSize"));
-        }
-
-        @Override
-        public void run() {
-            final List<AbstractMap.SimpleImmutableEntry<CompletableFuture<Void>, DataChangeEvent<NakadiEvent>>> tuples = new ArrayList<>();
-            AbstractMap.SimpleImmutableEntry<CompletableFuture<Void>, DataChangeEvent<NakadiEvent>> tuple;
-            while (!closing) {
-                for (int i = 0; i < batchSize; i++) {
-                    tuple = queue.poll();
-                    if(tuple != null) {
-                        tuples.add(tuple);
-                    }
-                }
-                if(!tuples.isEmpty()) {
-                    List<DataChangeEvent<NakadiEvent>> events = tuples.stream()
-                            .map(AbstractMap.SimpleImmutableEntry::getValue)
-                            .collect(Collectors.toList());
-
-                    eventResource.send(topic, events);
-                    tuples.stream()
-                            .map(AbstractMap.SimpleImmutableEntry::getKey)
-                            .forEach(voidCompletableFuture -> voidCompletableFuture.complete(null));
-                    tuples.clear();
-                }
-            }
-        }
+        sink.complete();
     }
 }
