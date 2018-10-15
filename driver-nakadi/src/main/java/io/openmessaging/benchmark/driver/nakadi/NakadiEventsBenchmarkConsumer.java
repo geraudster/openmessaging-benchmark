@@ -24,29 +24,28 @@ import io.openmessaging.benchmark.driver.nakadi.observer.BenchmarkDataChangeEven
 import nakadi.NakadiClient;
 import nakadi.StreamConfiguration;
 import nakadi.StreamProcessor;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.util.Properties;
 
-public class NakadiBenchmarkConsumer implements BenchmarkConsumer {
+public class NakadiEventsBenchmarkConsumer implements BenchmarkConsumer {
+    private final Logger logger = LoggerFactory.getLogger(NakadiEventsBenchmarkConsumer.class);
 
     private final StreamProcessor processor;
 
-    public NakadiBenchmarkConsumer(NakadiClient nakadiClient, String topic, Properties consumerProperties, ConsumerCallback callback) {
-
+    public NakadiEventsBenchmarkConsumer(NakadiClient nakadiClient, String topic, Properties consumerProperties, ConsumerCallback callback) {
         StreamConfiguration sc = new StreamConfiguration()
                 .eventTypeName(topic);
-//                .batchBufferCount(Integer.parseInt(consumerProperties.getProperty("batchBufferCount")));
 
         processor = nakadiClient.resources().streamBuilder()
                 .streamConfiguration(sc)
                 .streamObserverFactory(new BenchmarkDataChangeEventObserverProvider(callback))
-                .streamOffsetObserver(streamCursorContext -> {
-
-                })
+                .streamOffsetObserver(streamCursorContext -> {})
                 .build();
 
         processor.start();
-        System.out.println("Processor started");
+        logger.info("Consumer started");
 
     }
 

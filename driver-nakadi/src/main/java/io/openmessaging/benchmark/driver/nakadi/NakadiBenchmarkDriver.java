@@ -31,6 +31,8 @@ import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.driver.ConsumerCallback;
 import nakadi.*;
 import org.apache.bookkeeper.stats.StatsLogger;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 
 import java.io.File;
 import java.io.IOException;
@@ -42,10 +44,14 @@ import java.util.concurrent.CompletableFuture;
 import static io.openmessaging.benchmark.driver.nakadi.NakadiEvent.BENCHMARK_EVENT;
 
 public class NakadiBenchmarkDriver implements BenchmarkDriver {
+    private final static Logger logger = LoggerFactory.getLogger(NakadiBenchmarkDriver.class);
+
     private NakadiClient nakadiClient;
     private final Properties commonProperties = new Properties();
     private final Properties producerProperties = new Properties();
     private final Properties consumerProperties = new Properties();
+    private SubscriptionResource subscriptionResource;
+    private Subscription createdSubscription;
 
 
     @Override
@@ -70,15 +76,9 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
     public CompletableFuture<Void> createTopic(String topic, int partitions) {
         return CompletableFuture.runAsync(() -> {
             try {
+                String jsonSchema = createJsonSchema();
+
                 EventTypeResource eventTypes = nakadiClient.resources().eventTypes();
-
-                ObjectMapper mapper = new ObjectMapper();
-                JsonSchemaGenerator schemaGen = new JsonSchemaGenerator(mapper);
-
-                JsonSchema schema = schemaGen.generateSchema(NakadiEvent.class);
-
-                String jsonSchema = mapper.writerWithDefaultPrettyPrinter().writeValueAsString(schema);
-                System.out.println(jsonSchema);
 
                 // create a new event type, using an escaped string for the schema
                 EventType nakadiEventType = new EventType()
@@ -89,15 +89,44 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
                         .enrichmentStrategy(EventType.ENRICHMENT_METADATA)
                         .partitionKeyFields("key")
                         .cleanupPolicy("delete")
-                        .eventTypeStatistics(new EventTypeStatistics(10000*60, 1024, 10, 10))
+                        .eventTypeStatistics(new EventTypeStatistics(10000*60, 1024, 2, 1))
                         .schema(new EventTypeSchema().schema(
                                 jsonSchema));
+
                 Response response = eventTypes.create(nakadiEventType);
-                System.out.println(response.responseBody().asString());
+
+                if(this.commonProperties.getProperty("mode").equals("subscription")) {
+                    createSubscription(nakadiEventType);
+                }
+
+                logger.info("EventType created {}", response);
             } catch (JsonProcessingException e) {
                 throw new RuntimeException(e);
             }
         });
+    }
+
+    private String createJsonSchema() throws JsonProcessingException {
+        ObjectMapper mapper = new ObjectMapper();
+        JsonSchemaGenerator schemaGen = new JsonSchemaGenerator(mapper);
+
+        JsonSchema schema = schemaGen.generateSchema(NakadiEvent.class);
+
+        return mapper.writerWithDefaultPrettyPrinter().writeValueAsString(schema);
+    }
+
+    private void createSubscription(EventType nakadiEventType) {
+        // grab a subscription resource
+        subscriptionResource = nakadiClient.resources().subscriptions();
+
+        // create a new subscription
+        Subscription subscription = new Subscription()
+                .consumerGroup("openmessaging-cg")
+                .eventType(nakadiEventType.name())
+                .owningApplication("open-messaging-consumer");
+
+        createdSubscription = subscriptionResource.create(subscription);
+        logger.info("Subscription created {}", createdSubscription);
     }
 
     @Override
@@ -107,7 +136,13 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
 
     @Override
     public CompletableFuture<BenchmarkConsumer> createConsumer(String topic, String subscriptionName, ConsumerCallback consumerCallback) {
-        return CompletableFuture.completedFuture(new NakadiBenchmarkConsumer(nakadiClient, topic, consumerProperties, consumerCallback));
+        final BenchmarkConsumer consumer;
+        if(this.commonProperties.getProperty("mode").equals("subscription")) {
+            consumer = new NakadiSubscriptionBenchmarkConsumer(nakadiClient, consumerProperties, consumerCallback, createdSubscription.id());
+        } else {
+            consumer = new NakadiEventsBenchmarkConsumer(nakadiClient, topic, consumerProperties, consumerCallback);
+        }
+        return CompletableFuture.completedFuture(consumer);
     }
 
     @Override

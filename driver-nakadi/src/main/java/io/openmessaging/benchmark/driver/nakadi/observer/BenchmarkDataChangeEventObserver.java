@@ -68,24 +68,31 @@ public class BenchmarkDataChangeEventObserver
 
     @Override
     public void onNext(StreamBatchRecord<DataChangeEvent<Map<String, Object>>> record) {
+        final StreamOffsetObserver offsetObserver = record.streamOffsetObserver();
         final StreamBatch<DataChangeEvent<Map<String, Object>>> batch = record.streamBatch();
         final StreamCursorContext cursor = record.streamCursorContext();
 
         if (batch.isEmpty()) {
-            logger.info("partition: %s empty batch", cursor.cursor().partition());
+            logger.info("partition: {} empty batch", cursor.cursor().partition());
         } else {
-            final List<DataChangeEvent<Map<String, Object>>> events = batch.events();
-
-            for (DataChangeEvent<Map<String, Object>> event : events) {
-                List<Double> byteList = (ArrayList<Double>) event.data().get("payload");
-                byte[] data = new byte[byteList.size()];
-                for (int i = 0; i < data.length; i++) {
-                    data[i] = byteList.get(i).byteValue();
-                }
-                consumerCallback.messageReceived(
-                        data,
-                        event.metadata().occurredAt().toInstant().toEpochMilli());
-            }
+            batch.events().forEach(event -> consumerCallback.messageReceived(
+                    getBytes(event),
+                    getPublishTimestamp(event))
+            );
         }
+        offsetObserver.onNext(record.streamCursorContext());
+    }
+
+    private long getPublishTimestamp(DataChangeEvent<Map<String, Object>> event) {
+        return event.metadata().occurredAt().toInstant().toEpochMilli();
+    }
+
+    private byte[] getBytes(DataChangeEvent<Map<String, Object>> event) {
+        List<Double> byteList = (ArrayList<Double>) event.data().get("payload");
+        byte[] data = new byte[byteList.size()];
+        for (int i = 0; i < data.length; i++) {
+            data[i] = byteList.get(i).byteValue();
+        }
+        return data;
     }
 }
