@@ -29,6 +29,11 @@ import io.openmessaging.benchmark.driver.BenchmarkConsumer;
 import io.openmessaging.benchmark.driver.BenchmarkDriver;
 import io.openmessaging.benchmark.driver.BenchmarkProducer;
 import io.openmessaging.benchmark.driver.ConsumerCallback;
+import io.openmessaging.benchmark.driver.nakadi.adapter.DataChangeEventAdapter;
+import io.openmessaging.benchmark.driver.nakadi.adapter.EventAdapter;
+import io.openmessaging.benchmark.driver.nakadi.adapter.UndefinedEventAdapter;
+import io.openmessaging.benchmark.driver.nakadi.observer.BenchmarkDataChangeEventObserverProvider;
+import io.openmessaging.benchmark.driver.nakadi.observer.BenchmarkUndefinedEventObserverProvider;
 import nakadi.*;
 import org.apache.bookkeeper.stats.StatsLogger;
 import org.slf4j.Logger;
@@ -52,6 +57,8 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
     private final Properties consumerProperties = new Properties();
     private SubscriptionResource subscriptionResource;
     private Subscription createdSubscription;
+    private EventAdapter eventAdapter;
+    private EventType.Category eventCategory;
 
 
     @Override
@@ -65,6 +72,18 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
         nakadiClient = NakadiClient.newBuilder()
                 .baseURI(nakadiUri)
                 .build();
+
+        this.eventCategory = EventType.Category.valueOf(commonProperties.getProperty("eventCategory"));
+        switch (this.eventCategory) {
+            case data:
+                eventAdapter = new DataChangeEventAdapter();
+                break;
+            case undefined:
+                eventAdapter = new UndefinedEventAdapter();
+                break;
+            default:
+                throw new RuntimeException("Event category not implemented " + this.eventCategory);
+        }
     }
 
     @Override
@@ -81,17 +100,7 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
                 EventTypeResource eventTypes = nakadiClient.resources().eventTypes();
 
                 // create a new event type, using an escaped string for the schema
-                EventType nakadiEventType = new EventType()
-                        .category(EventType.Category.data)
-                        .name(topic)
-                        .owningApplication("open-messaging")
-                        .partitionStrategy(EventType.PARTITION_RANDOM)
-                        .enrichmentStrategy(EventType.ENRICHMENT_METADATA)
-                        .partitionKeyFields("key")
-                        .cleanupPolicy("delete")
-                        .eventTypeStatistics(new EventTypeStatistics(10000*60, 1024, 2, 1))
-                        .schema(new EventTypeSchema().schema(
-                                jsonSchema));
+                EventType nakadiEventType = createEventType(topic, jsonSchema);
 
                 Response response = eventTypes.create(nakadiEventType);
 
@@ -104,6 +113,25 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
                 throw new RuntimeException(e);
             }
         });
+    }
+
+    private EventType createEventType(String topic, String jsonSchema) {
+        final EventType eventType = new EventType()
+                .category(this.eventCategory)
+                .name(topic)
+                .owningApplication("open-messaging")
+                .cleanupPolicy("delete")
+                .eventTypeStatistics(new EventTypeStatistics(10000 * 60, 1024, 2, 1))
+                .schema(new EventTypeSchema().schema(
+                        jsonSchema));
+
+        if (this.eventCategory == EventType.Category.data) {
+            return eventType.partitionStrategy(EventType.PARTITION_RANDOM)
+                    .enrichmentStrategy(EventType.ENRICHMENT_METADATA)
+                    .partitionKeyFields("key");
+        } else {
+            return eventType;
+        }
     }
 
     private String createJsonSchema() throws JsonProcessingException {
@@ -131,16 +159,23 @@ public class NakadiBenchmarkDriver implements BenchmarkDriver {
 
     @Override
     public CompletableFuture<BenchmarkProducer> createProducer(String topic) {
-        return CompletableFuture.completedFuture(new NakadiBenchmarkProducer(nakadiClient, topic, producerProperties));
+        return CompletableFuture.completedFuture(new NakadiBenchmarkProducer(nakadiClient, topic, producerProperties, eventAdapter));
     }
 
     @Override
     public CompletableFuture<BenchmarkConsumer> createConsumer(String topic, String subscriptionName, ConsumerCallback consumerCallback) {
+        final StreamObserverProvider streamObserverProvider;
+        if(this.eventCategory == EventType.Category.data) {
+            streamObserverProvider = new BenchmarkDataChangeEventObserverProvider(consumerCallback);
+        } else {
+            streamObserverProvider = new BenchmarkUndefinedEventObserverProvider(consumerCallback);
+        }
+
         final BenchmarkConsumer consumer;
         if(this.commonProperties.getProperty("mode").equals("subscription")) {
-            consumer = new NakadiSubscriptionBenchmarkConsumer(nakadiClient, consumerProperties, consumerCallback, createdSubscription.id());
+            consumer = new NakadiSubscriptionBenchmarkConsumer(nakadiClient, consumerProperties, streamObserverProvider, createdSubscription.id());
         } else {
-            consumer = new NakadiEventsBenchmarkConsumer(nakadiClient, topic, consumerProperties, consumerCallback);
+            consumer = new NakadiEventsBenchmarkConsumer(nakadiClient, consumerProperties, streamObserverProvider, topic);
         }
         return CompletableFuture.completedFuture(consumer);
     }

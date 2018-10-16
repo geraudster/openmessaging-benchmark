@@ -23,6 +23,7 @@ import io.openmessaging.benchmark.driver.ConsumerCallback;
 import io.openmessaging.benchmark.driver.nakadi.observer.BenchmarkDataChangeEventObserverProvider;
 import nakadi.NakadiClient;
 import nakadi.StreamConfiguration;
+import nakadi.StreamObserverProvider;
 import nakadi.StreamProcessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,7 +35,7 @@ public class NakadiSubscriptionBenchmarkConsumer implements BenchmarkConsumer {
 
     private final StreamProcessor processor;
 
-    public NakadiSubscriptionBenchmarkConsumer(NakadiClient nakadiClient, Properties consumerProperties, ConsumerCallback callback, String subscriptionId) {
+    public NakadiSubscriptionBenchmarkConsumer(NakadiClient nakadiClient, Properties consumerProperties, StreamObserverProvider streamObserverProvider, String subscriptionId) {
         int batchBufferCount = Integer.parseInt(consumerProperties.getProperty("batchBufferCount"));
         StreamConfiguration sc = new StreamConfiguration()
                 .subscriptionId(subscriptionId)
@@ -43,7 +44,7 @@ public class NakadiSubscriptionBenchmarkConsumer implements BenchmarkConsumer {
 
         processor = nakadiClient.resources().streamBuilder()
                 .streamConfiguration(sc)
-                .streamObserverFactory(new BenchmarkDataChangeEventObserverProvider(callback))
+                .streamObserverFactory(streamObserverProvider)
                 .build();
 
         processor.start();

@@ -24,8 +24,10 @@ driverClass: io.openmessaging.benchmark.driver.nakadi.NakadiBenchmarkDriver
 ## Nakadi client-specific configuration
 commonConfig: |
   nakadiBaseUri=http://localhost:8080
-  mode=subscription
-#  mode=events
+  mode=events
+  #mode=subscription
+  #eventCategory=data
+  eventCategory=undefined
 
 producerConfig: |
   batchSize=500

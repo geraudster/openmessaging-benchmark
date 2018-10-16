@@ -19,10 +19,9 @@
 package io.openmessaging.benchmark.driver.nakadi;
 
 import io.openmessaging.benchmark.driver.BenchmarkConsumer;
-import io.openmessaging.benchmark.driver.ConsumerCallback;
-import io.openmessaging.benchmark.driver.nakadi.observer.BenchmarkDataChangeEventObserverProvider;
 import nakadi.NakadiClient;
 import nakadi.StreamConfiguration;
+import nakadi.StreamObserverProvider;
 import nakadi.StreamProcessor;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
@@ -34,13 +33,13 @@ public class NakadiEventsBenchmarkConsumer implements BenchmarkConsumer {
 
     private final StreamProcessor processor;
 
-    public NakadiEventsBenchmarkConsumer(NakadiClient nakadiClient, String topic, Properties consumerProperties, ConsumerCallback callback) {
+    public NakadiEventsBenchmarkConsumer(NakadiClient nakadiClient, Properties consumerProperties, StreamObserverProvider streamObserverProvider, String topic) {
         StreamConfiguration sc = new StreamConfiguration()
                 .eventTypeName(topic);
 
         processor = nakadiClient.resources().streamBuilder()
                 .streamConfiguration(sc)
-                .streamObserverFactory(new BenchmarkDataChangeEventObserverProvider(callback))
+                .streamObserverFactory(streamObserverProvider)
                 .streamOffsetObserver(streamCursorContext -> {})
                 .build();
 
