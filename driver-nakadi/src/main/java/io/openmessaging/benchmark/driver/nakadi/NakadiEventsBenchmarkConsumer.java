@@ -44,7 +44,7 @@ public class NakadiEventsBenchmarkConsumer implements BenchmarkConsumer {
                 .build();
 
         processor.start();
-        logger.info("Consumer started");
+        logger.info("NakadiEventsBenchmarkConsumer started");
 
     }
 

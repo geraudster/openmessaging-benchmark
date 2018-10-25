@@ -23,36 +23,46 @@ import io.openmessaging.benchmark.driver.nakadi.adapter.EventAdapter;
 import nakadi.Event;
 import nakadi.EventResource;
 import nakadi.NakadiClient;
+import nakadi.Response;
 import org.slf4j.Logger;
 import org.slf4j.LoggerFactory;
 import reactor.core.publisher.Flux;
 import reactor.core.publisher.FluxSink;
-import reactor.core.publisher.WorkQueueProcessor;
+import reactor.core.publisher.TopicProcessor;
 
+import java.time.Duration;
+import java.util.List;
 import java.util.Optional;
 import java.util.Properties;
 import java.util.concurrent.CompletableFuture;
+import java.util.stream.Collectors;
 
 public class NakadiBenchmarkProducer implements BenchmarkProducer {
     private static final Logger logger = LoggerFactory.getLogger(NakadiBenchmarkProducer.class);
 
     private final EventResource eventResource;
 
-    private final WorkQueueProcessor<Event<NakadiEvent>> processor;
-    private final FluxSink<Event<NakadiEvent>> sink;
+    private final TopicProcessor<EventFuture> processor;
+    private final FluxSink<EventFuture> sink;
     private final EventAdapter eventAdapter;
 
     public NakadiBenchmarkProducer(NakadiClient nakadiClient, String topic, Properties producerConfig, EventAdapter eventAdapter) {
         this.eventResource = nakadiClient.resources().events();
         int batchSize = Integer.parseInt(producerConfig.getProperty("batchSize"));
+        int bufferTimeout = Integer.parseInt(producerConfig.getProperty("bufferTimeout"));
         this.eventAdapter = eventAdapter;
 
-        processor = WorkQueueProcessor.create();
+        processor = TopicProcessor.create();
         sink = processor.sink(FluxSink.OverflowStrategy.DROP);
 
         Flux.from(processor)
-//                .buffer(batchSize)
-                .map(events -> eventResource.send(topic, events))
+                .bufferTimeout(batchSize, Duration.ofMillis(bufferTimeout))
+                .map(eventFutures -> {
+                    List<Event<NakadiEvent>> events = eventFutures.stream().map(eventFuture -> eventFuture.event).collect(Collectors.toList());
+                    Response response = eventResource.send(topic, events);
+                    eventFutures.forEach(eventFuture -> eventFuture.future.complete(null));
+                    return response;
+                })
                 .subscribe();
 
         logger.info("Producer started");
@@ -63,14 +73,23 @@ public class NakadiBenchmarkProducer implements BenchmarkProducer {
         final CompletableFuture<Void> future = new CompletableFuture<>();
         Event<NakadiEvent> event = eventAdapter.convertToEvent(new NakadiEvent(key.orElse(""), payload));
 
-        sink.next(event);
+        sink.next(new EventFuture(event, future));
 
-        future.complete(null);
         return future;
     }
 
     @Override
     public void close() throws Exception {
         sink.complete();
+    }
+
+    class EventFuture {
+        final Event<NakadiEvent> event;
+        final CompletableFuture<Void> future;
+
+        EventFuture(Event<NakadiEvent> event, CompletableFuture<Void> future) {
+            this.event = event;
+            this.future = future;
+        }
     }
 }
